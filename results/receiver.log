@@ -1,0 +1,55 @@
+Invalid -W option ignored: invalid module name: 'sklearn.exceptions'
+INFO:     Started server process [47079]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:18193 (Press CTRL+C to quit)
+INFO:     127.0.0.1:41434 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41440 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41456 - "GET /trips HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41458 - "POST /match HTTP/1.1" 404 Not Found
+INFO:     PathSnap match mode=demo trip=00000000 observations=2503 prediction_ms=4281.1 accuracy=0.962845
+INFO:     127.0.0.1:41472 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000007 observations=1354 prediction_ms=589.0 accuracy=0.994092
+INFO:     127.0.0.1:34304 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000009 observations=1049 prediction_ms=1711.8 accuracy=0.897998
+INFO:     127.0.0.1:34310 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000040 observations=2995 prediction_ms=5339.8 accuracy=0.92621
+INFO:     127.0.0.1:34324 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000052 observations=262 prediction_ms=126.5 accuracy=0.973282
+INFO:     127.0.0.1:34330 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000056 observations=3958 prediction_ms=4433.9 accuracy=0.944164
+INFO:     127.0.0.1:34344 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000065 observations=768 prediction_ms=861.7 accuracy=0.914062
+INFO:     127.0.0.1:37338 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000076 observations=1486 prediction_ms=5026.9 accuracy=0.929341
+INFO:     127.0.0.1:37342 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000077 observations=3911 prediction_ms=1482.1 accuracy=0.768346
+INFO:     127.0.0.1:46190 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000091 observations=874 prediction_ms=745.9 accuracy=0.902746
+INFO:     127.0.0.1:46196 - "POST /match HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46212 - "GET /trips HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46212 - "OPTIONS /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000000 observations=2503 prediction_ms=4284.9 accuracy=0.962845
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000007 observations=1354 prediction_ms=605.4 accuracy=0.994092
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000009 observations=1049 prediction_ms=1368.4 accuracy=0.897998
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000040 observations=2995 prediction_ms=5233.5 accuracy=0.92621
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000056 observations=3958 prediction_ms=4367.1 accuracy=0.944164
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000065 observations=768 prediction_ms=833.0 accuracy=0.914062
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000076 observations=1486 prediction_ms=4488.1 accuracy=0.929341
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000077 observations=3911 prediction_ms=1595.3 accuracy=0.768346
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000091 observations=874 prediction_ms=881.0 accuracy=0.902746
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     PathSnap match mode=demo trip=00000052 observations=262 prediction_ms=156.9 accuracy=0.973282
+INFO:     127.0.0.1:46220 - "POST /match HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47079]

@@ -1,0 +1,12 @@
+GET /health {'status': 'ok', 'mode': 'evaluator'}
+GET /trips {"mode": "evaluator", "trip_ids": ["00000000", "00000007", "00000009", "00000040", "00000052", "00000056", "00000065", "00000076", "00000077", "00000091"]}
+POST /match 200 00000000 2503 observations accuracy=0.962845 prediction_ms=4478.5
+POST /match 200 00000007 1354 observations accuracy=0.994092 prediction_ms=596.3
+POST /match 200 00000009 1049 observations accuracy=0.897998 prediction_ms=1853.1
+POST /match 200 00000040 2995 observations accuracy=0.92621 prediction_ms=5309.8
+POST /match 200 00000052 262 observations accuracy=0.973282 prediction_ms=138.2
+POST /match 200 00000056 3958 observations accuracy=0.944164 prediction_ms=4581.1
+POST /match 200 00000065 768 observations accuracy=0.914062 prediction_ms=930.0
+POST /match 200 00000076 1486 observations accuracy=0.929341 prediction_ms=4430.4
+POST /match 200 00000077 3911 observations accuracy=0.768346 prediction_ms=1446.0
+POST /match 200 00000091 874 observations accuracy=0.902746 prediction_ms=721.0

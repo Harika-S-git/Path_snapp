@@ -1,0 +1,130 @@
+"""Decoder tuning, held-out comparison, and reproducible Folium maps."""
+import csv
+import json
+from pathlib import Path
+import sys
+from time import perf_counter
+
+import folium
+import joblib
+import numpy as np
+
+from .core import Trip, probabilities
+from .data import prefixes
+from .train import fit, load_partition, observation_stats
+
+
+def measure(trip, truth, route, states, config):
+    rebuilt, breaks = trip.route_geometry(states, max_distance=config["max_distance"],
+                                         reset_gap=config["reset_gap"])
+    arcs = trip.arcs
+    repeated = states[1:] == states[:-1]
+    connected = arcs[states[:-1], 1] == arcs[states[1:], 0]
+    ref, pred = set(route), set(rebuilt)
+    return dict(**observation_stats(truth, states), continuity=float(np.mean(repeated | connected)),
+                arc_jaccard=len(ref & pred) / len(ref | pred), breaks=len(breaks),
+                exact_route=int(list(route) == rebuilt))
+
+
+def map_for(trip, route, predicted):
+    center = trip.track[:, :2].mean(axis=0)[::-1]
+    result = folium.Map(location=center, tiles=None, control_scale=True, zoom_start=14)
+    folium.TileLayer("OpenStreetMap", name="Street basemap", show=False).add_to(result)
+    bounds = np.vstack([trip.track[:, :2], trip.nodes[trip.arcs[predicted]].reshape(-1, 2)])
+    low, high = bounds.min(axis=0), bounds.max(axis=0)
+    line = trip.nodes[trip.arcs]
+    inside = ((line >= low - .003) & (line <= high + .003)).all(axis=(1, 2))
+    layers = [
+        ("Road network", "#a3b0ae", 1, line[inside]),
+        ("Reference route", "#843bd1", 5, line[route]),
+        ("Predicted route", "#008455", 3, line[predicted]),
+    ]
+    for label, color, weight, data in layers:
+        group = folium.FeatureGroup(name=label).add_to(result)
+        folium.PolyLine(data[..., ::-1].tolist(), color=color, weight=weight, opacity=.8).add_to(group)
+    gps = folium.FeatureGroup(name="GPS observations").add_to(result)
+    for point in trip.track[:, :2]:
+        folium.CircleMarker(point[::-1].tolist(), radius=2, color="#2878da", fill=True,
+                            fill_opacity=.85, weight=1).add_to(gps)
+    folium.LayerControl(collapsed=False).add_to(result)
+    legend = """<div style="position:fixed;bottom:53px;left:22px;z-index:9999;background:white;
+    padding:12px 16px;border-radius:6px;color:#162720;font:14px system-ui">
+    <b>PathSnap · student-test trip</b><br><span style="color:#2878da">●</span> GPS
+    &nbsp;<span style="color:#843bd1">━</span> Reference
+    &nbsp;<span style="color:#008455">━</span> Predicted
+    &nbsp;<span style="color:#71817e">━</span> Network</div>"""
+    result.get_root().html.add_child(folium.Element(legend))
+    result.fit_bounds([low[::-1].tolist(), high[::-1].tolist()])
+    return result
+
+
+def write_csv(path, rows):
+    with Path(path).open("w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0]), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+MAP_TRIPS = ("00000052", "00000056")
+BETAS = (8.0, 14.0, 20.0, 35.0)
+
+
+def compare(root, cache="cache"):
+    bundle = joblib.load("artifacts/model.joblib")
+    model, config = bundle["model"], bundle["decoder"]
+    folds = json.loads(Path("results/models.json").read_text())["folds"]
+    train = dict(load_partition(cache, "train"))
+    networks = {prefix.name: prefix for prefix in prefixes(root, "train")}
+    validation_ids = [label for fold in folds for label in fold]
+    if len(validation_ids) != len(train) or set(validation_ids) != train.keys() or train.keys() != networks.keys():
+        raise ValueError("Decoder calibration requires the same training trips and folds as training")
+    tuning = []
+    for fold_index, validation in enumerate(folds, 1):
+        held_out = set(validation)
+        fold_model = fit(bundle["name"], bundle["config"],
+                         [(label, trip) for label, trip in train.items() if label not in held_out])
+        for label in validation:
+            trip = Trip(networks[label])
+            cached = train[label]
+            ids = cached["ids"]
+            p = probabilities(fold_model, cached["features"])
+            decoded = trip.decode_betas(ids, cached["fraction"], p, BETAS,
+                                        reset_gap=config["reset_gap"], max_distance=config["max_distance"])
+            for beta, states in zip(BETAS, decoded):
+                tuning.append(dict(fold=fold_index, trip=label, beta=beta,
+                                   **observation_stats(cached["truth"], states)))
+            print(f"OOF fold {fold_index} trip {label}", flush=True)
+    write_csv("results/decoder_search.csv", tuning)
+    selected = max(BETAS, key=lambda beta: np.mean(
+        [r["macro_f1"] for r in tuning if r["beta"] == beta]))
+    settings = dict(config, beta=selected)
+    bundle["decoder"] = settings
+    joblib.dump(bundle, "artifacts/model.joblib", compress=3)
+    Path("results/decoder_config.json").write_text(json.dumps(settings, indent=2))
+    rows = []
+    for prefix in prefixes(root, "student_test"):
+        start = perf_counter()
+        trip = Trip(prefix)
+        ids, fractions, features = trip.candidates()
+        p = probabilities(model, features)
+        classifier = ids[np.arange(len(ids)), p.argmax(axis=1)]
+        base_seconds = perf_counter() - start
+        decoded = trip.decode(ids, fractions, p, **settings)
+        decode_seconds = perf_counter() - start
+        reference, truth = trip.reference(prefix)
+        for name, states, seconds in (("Classifier", classifier, base_seconds), ("Viterbi", decoded, decode_seconds)):
+            rows.append(dict(trip=prefix.name, method=name, seconds=seconds,
+                             **measure(trip, truth, reference, states, settings)))
+        if prefix.name in MAP_TRIPS:
+            reconstructed, _ = trip.route_geometry(decoded, max_distance=settings["max_distance"],
+                                                   reset_gap=settings["reset_gap"])
+            map_html = map_for(trip, reference, reconstructed).get_root().render()
+            destination = Path(f"results/student_trip_map_{prefix.name}.html")
+            destination.write_text("\n".join(line.rstrip() for line in map_html.splitlines()) + "\n",
+                                   encoding="utf-8")
+        print(prefix.name, round(decode_seconds, 2), flush=True)
+    write_csv("results/routes.csv", rows)
+
+
+if __name__ == "__main__":
+    compare(*sys.argv[1:])

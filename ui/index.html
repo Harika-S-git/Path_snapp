@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PathSnap · Neural GPS Route Reconstruction Mission Control</title>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <!-- Leaflet CSS for rich interactive mapping -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- FontAwesome for high-tech HUD icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <link rel="stylesheet" href="style.css" />
+    <!-- Leaflet JS -->
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script defer src="app.js"></script>
+  </head>
+  <body class="theme-dark">
+    <!-- TOP NAVIGATION & MISSION CONTROL BAR -->
+    <header class="mission-header">
+      <div class="brand-zone">
+        <div class="radar-pulse">
+          <div class="radar-sweep"></div>
+          <i class="fa-solid fa-satellite-dish"></i>
+        </div>
+        <div class="brand-titles">
+          <div class="brand-row">
+            <span class="brand-main">PATHSNAP</span>
+            <span class="brand-badge">NEURAL GPS v2.4</span>
+            <span class="brand-subbadge" id="mode-badge">INITIALIZING</span>
+          </div>
+          <span class="brand-tagline">HMM-Viterbi Probabilistic Map-Matching Engine</span>
+        </div>
+      </div>
+
+      <!-- VIEW TABS -->
+      <nav class="nav-tabs" role="tablist">
+        <button class="nav-tab active" data-tab="map-view" id="tab-map">
+          <i class="fa-solid fa-map-location-dot"></i> Mission Map
+        </button>
+        <button class="nav-tab" data-tab="diff-view" id="tab-diff">
+          <i class="fa-solid fa-code-compare"></i> Classifier vs HMM
+        </button>
+        <button class="nav-tab" data-tab="folium-view" id="tab-folium">
+          <i class="fa-solid fa-globe"></i> Official Folium Maps
+        </button>
+        <button class="nav-tab" data-tab="benchmarks-view" id="tab-benchmarks">
+          <i class="fa-solid fa-chart-line"></i> Benchmark Matrix
+        </button>
+        <button class="nav-tab" data-tab="terminal-view" id="tab-terminal">
+          <i class="fa-solid fa-terminal"></i> 2-Laptop API Hub
+        </button>
+      </nav>
+
+      <!-- CONNECTION HUD -->
+      <div class="connection-hud">
+        <div class="endpoint-input-wrap">
+          <i class="fa-solid fa-network-wired endpoint-icon"></i>
+          <input
+            id="api-url"
+            type="url"
+            placeholder="http://localhost:8000"
+            value="http://localhost:8000"
+            title="FastAPI Inference Server URL"
+          />
+          <button id="btn-reconnect" class="hud-icon-btn" title="Ping / Reconnect">
+            <i class="fa-solid fa-rotate"></i>
+          </button>
+        </div>
+        <div class="ping-pill" id="ping-indicator">
+          <span class="ping-dot"></span>
+          <span id="ping-text">Checking</span>
+        </div>
+        <div class="export-dropdown-wrap">
+          <button id="btn-export-menu" class="btn-action btn-sm">
+            <i class="fa-solid fa-download"></i> Export <i class="fa-solid fa-chevron-down"></i>
+          </button>
+          <div class="export-dropdown" id="export-dropdown">
+            <button id="btn-export-geojson"><i class="fa-solid fa-file-code"></i> GeoJSON Route</button>
+            <button id="btn-export-csv"><i class="fa-solid fa-file-csv"></i> GPS Track CSV</button>
+            <button id="btn-export-json"><i class="fa-solid fa-file-lines"></i> Full Prediction JSON</button>
+            <button id="btn-export-png"><i class="fa-solid fa-image"></i> Map Snapshot (PNG)</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN COCKPIT CONTAINER -->
+    <div class="cockpit-container">
+      <!-- SIDEBAR CONTROLS & TRIP DECK -->
+      <aside class="trip-deck" id="sidebar-deck">
+        <div class="deck-section-title">
+          <i class="fa-solid fa-layer-group"></i> TRIP RECONSTRUCTION DECK
+        </div>
+
+        <!-- TRIP SELECTION ACCORDION / GRID -->
+        <div class="trip-selector-card">
+          <label for="trip-select" class="selector-label">Target Trajectory</label>
+          <div class="custom-select-wrap">
+            <select id="trip-select">
+              <option value="00000052">Trip 00000052 (Urban Grid · 262 pts)</option>
+              <option value="00000056">Trip 00000056 (Highway & Gaps · 3958 pts)</option>
+              <option value="00000000">Trip 00000000 (Suburban Run · 2503 pts)</option>
+              <option value="00000007">Trip 00000007 (Dense Network · 1354 pts)</option>
+              <option value="00000009">Trip 00000009 (Arterial Corridor · 1049 pts)</option>
+              <option value="00000040">Trip 00000040 (Mixed Highway · 2995 pts)</option>
+              <option value="00000065">Trip 00000065 (Expressway Arc · 768 pts)</option>
+              <option value="00000076">Trip 00000076 (Downtown Loop · 1486 pts)</option>
+              <option value="00000077">Trip 00000077 (Long Haul Gaps · 3911 pts)</option>
+              <option value="00000091">Trip 00000091 (Complex Junctions · 874 pts)</option>
+            </select>
+            <i class="fa-solid fa-caret-down select-caret"></i>
+          </div>
+
+          <!-- PRIMARY ACTION BUTTON -->
+          <button id="btn-reconstruct" class="btn-execute">
+            <span class="btn-glow"></span>
+            <i class="fa-solid fa-bolt"></i> RECONSTRUCT ROUTE
+          </button>
+        </div>
+
+        <!-- QUICK TRIP PILL SELECTOR -->
+        <div class="quick-trips-tray">
+          <div class="quick-trips-label">Quick Select (10 Trips):</div>
+          <div class="quick-pills-grid" id="quick-pills">
+            <!-- Dynamically populated or static pills -->
+            <button class="trip-pill active" data-trip="00000052">#52</button>
+            <button class="trip-pill" data-trip="00000056">#56</button>
+            <button class="trip-pill" data-trip="00000000">#00</button>
+            <button class="trip-pill" data-trip="00000007">#07</button>
+            <button class="trip-pill" data-trip="00000009">#09</button>
+            <button class="trip-pill" data-trip="00000040">#40</button>
+            <button class="trip-pill" data-trip="00000065">#65</button>
+            <button class="trip-pill" data-trip="00000076">#76</button>
+            <button class="trip-pill" data-trip="00000077">#77</button>
+            <button class="trip-pill" data-trip="00000091">#91</button>
+          </div>
+        </div>
+
+        <!-- LAYER CONTROLLER -->
+        <div class="control-box layer-control-box">
+          <div class="box-title">
+            <i class="fa-solid fa-sliders"></i> Geospatial Layers
+          </div>
+          <div class="layer-toggle-list">
+            <label class="layer-switch">
+              <input type="checkbox" id="layer-viterbi" checked />
+              <span class="switch-ui neon-emerald"></span>
+              <span class="layer-name">
+                <span class="legend-swatch emerald-line"></span> HMM Viterbi Snapped Route
+              </span>
+            </label>
+            <label class="layer-switch">
+              <input type="checkbox" id="layer-classifier" checked />
+              <span class="switch-ui neon-amber"></span>
+              <span class="layer-name">
+                <span class="legend-swatch amber-dash"></span> Classifier-Only Predictions
+              </span>
+            </label>
+            <label class="layer-switch">
+              <input type="checkbox" id="layer-truth" checked />
+              <span class="switch-ui neon-purple"></span>
+              <span class="layer-name">
+                <span class="legend-swatch purple-line"></span> Reference Ground Truth
+              </span>
+            </label>
+            <label class="layer-switch">
+              <input type="checkbox" id="layer-gps" checked />
+              <span class="switch-ui neon-cyan"></span>
+              <span class="layer-name">
+                <span class="legend-swatch cyan-dot"></span> Raw GPS Observations
+              </span>
+            </label>
+            <label class="layer-switch">
+              <input type="checkbox" id="layer-network" checked />
+              <span class="switch-ui neon-slate"></span>
+              <span class="layer-name">
+                <span class="legend-swatch slate-line"></span> Road Network Geometry
+              </span>
+            </label>
+            <label class="layer-switch">
+              <input type="checkbox" id="layer-breaks" checked />
+              <span class="switch-ui neon-crimson"></span>
+              <span class="layer-name">
+                <span class="legend-swatch crimson-beacon"></span> Network Breaks & Gaps
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <!-- BASEMAP SELECTOR -->
+        <div class="control-box">
+          <div class="box-title">
+            <i class="fa-solid fa-earth-americas"></i> Map Basemap Style
+          </div>
+          <div class="basemap-grid">
+            <button class="basemap-btn active" data-style="dark">
+              <i class="fa-solid fa-moon"></i> Dark Matter
+            </button>
+            <button class="basemap-btn" data-style="satellite">
+              <i class="fa-solid fa-satellite"></i> Satellite
+            </button>
+            <button class="basemap-btn" data-style="osm">
+              <i class="fa-solid fa-map"></i> OpenStreet
+            </button>
+            <button class="basemap-btn" data-style="canvas">
+              <i class="fa-solid fa-vector-square"></i> Vector Grid
+            </button>
+          </div>
+        </div>
+
+        <!-- DECODER CALIBRATION PROFILE -->
+        <div class="control-box params-box">
+          <div class="box-title">
+            <i class="fa-solid fa-microchip"></i> Decoder Hyperparameters
+          </div>
+          <div class="param-pairs">
+            <div class="param-row">
+              <span class="param-label">Beta Transition Scale (&beta;):</span>
+              <span class="param-val" id="cfg-beta">20.0 m</span>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Large Gap Reset Threshold:</span>
+              <span class="param-val" id="cfg-reset">90.0 s</span>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Dijkstra Shortest Path Cap:</span>
+              <span class="param-val" id="cfg-cap">2000.0 m</span>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Spatial Candidate Shortlist (k):</span>
+              <span class="param-val" id="cfg-k">8 arcs / pt</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- CENTER DISPLAY COCKPIT -->
+      <main class="cockpit-viewport">
+        <!-- TOP HUD KPI METRICS STRIP -->
+        <section class="kpi-strip" aria-label="Key Performance Indicators">
+          <!-- KPI 1: POINTWISE ACCURACY GAUGE -->
+          <div class="kpi-card accent-emerald">
+            <div class="kpi-inner">
+              <div class="kpi-gauge-wrap">
+                <svg class="radial-gauge" viewBox="0 0 72 72">
+                  <circle class="gauge-bg" cx="36" cy="36" r="30" />
+                  <circle
+                    class="gauge-bar"
+                    id="gauge-accuracy-bar"
+                    cx="36"
+                    cy="36"
+                    r="30"
+                    stroke-dasharray="188.49"
+                    stroke-dashoffset="5"
+                  />
+                </svg>
+                <div class="gauge-number" id="kpi-accuracy">97.3%</div>
+              </div>
+              <div class="kpi-meta">
+                <span class="kpi-title">Pointwise Accuracy</span>
+                <span class="kpi-delta positive" id="kpi-accuracy-delta">
+                  <i class="fa-solid fa-arrow-up"></i> +3.57% vs RF
+                </span>
+                <span class="kpi-sub">Reference-aligned</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- KPI 2: SEQUENCE MACRO F1 & JACCARD -->
+          <div class="kpi-card accent-cyan">
+            <div class="kpi-header-row">
+              <span class="kpi-title">Sequence Macro F1</span>
+              <i class="fa-solid fa-diagram-project kpi-icon"></i>
+            </div>
+            <div class="kpi-large-num" id="kpi-f1">0.875</div>
+            <div class="kpi-split-row">
+              <span>Arc Jaccard: <strong id="kpi-jaccard">86.5%</strong></span>
+              <span class="badge-pill emerald" id="kpi-jaccard-delta">+19.2%</span>
+            </div>
+          </div>
+
+          <!-- KPI 3: ROUTE CONTINUITY & TOPOLOGY -->
+          <div class="kpi-card accent-purple">
+            <div class="kpi-header-row">
+              <span class="kpi-title">Route Continuity</span>
+              <i class="fa-solid fa-route kpi-icon"></i>
+            </div>
+            <div class="kpi-large-num" id="kpi-continuity">97.6%</div>
+            <div class="kpi-split-row">
+              <span>Breaks: <strong id="kpi-breaks">0 breaks</strong></span>
+              <span class="badge-pill purple" id="kpi-breaks-status">Connected</span>
+            </div>
+          </div>
+
+          <!-- KPI 4: TRIP TELEMETRY & SPATIAL PROFILE -->
+          <div class="kpi-card accent-amber">
+            <div class="kpi-header-row">
+              <span class="kpi-title">Trip Trajectory</span>
+              <i class="fa-solid fa-location-crosshairs kpi-icon"></i>
+            </div>
+            <div class="kpi-large-num" id="kpi-observations">2,503 pts</div>
+            <div class="kpi-split-row">
+              <span>Snapped Arcs: <strong id="kpi-arcs">312</strong></span>
+              <span>Length: <strong id="kpi-distance">12.4 km</strong></span>
+            </div>
+          </div>
+
+          <!-- KPI 5: NEURAL INFERENCE LATENCY -->
+          <div class="kpi-card accent-blue">
+            <div class="kpi-header-row">
+              <span class="kpi-title">Inference Time</span>
+              <i class="fa-solid fa-stopwatch kpi-icon"></i>
+            </div>
+            <div class="kpi-large-num" id="kpi-duration">126.5 ms</div>
+            <div class="kpi-split-row latency-split">
+              <span>Throughput: <strong id="kpi-throughput">2071 pts/s</strong></span>
+              <span class="badge-pill blue">Sub-second</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB CONTENT AREA -->
+        <div class="tab-content-wrapper">
+          <!-- 1. MISSION MAP VIEW (DEFAULT) -->
+          <div class="tab-pane active" id="pane-map">
+            <div class="map-stage">
+              <!-- LEAFLET MAP ELEMENT -->
+              <div id="leaflet-map" class="interactive-map"></div>
+
+              <!-- FALLBACK CANVAS ELEMENT (For offline local render) -->
+              <canvas id="fallback-canvas" class="fallback-canvas" hidden></canvas>
+
+              <!-- FLOATING MAP CONTROLS OVERLAY -->
+              <div class="floating-map-tools">
+                <button id="btn-fit-bounds" class="float-btn" title="Fit Trajectory Bounds">
+                  <i class="fa-solid fa-compress"></i>
+                </button>
+                <button id="btn-toggle-fullscreen" class="float-btn" title="Toggle Fullscreen">
+                  <i class="fa-solid fa-expand"></i>
+                </button>
+                <button id="btn-reset-map" class="float-btn" title="Reset View">
+                  <i class="fa-solid fa-arrows-rotate"></i>
+                </button>
+              </div>
+
+              <!-- FLOATING VEHICLE TELEMETRY HUD (Active during playback or hover) -->
+              <div class="telemetry-hud-overlay" id="telemetry-hud">
+                <div class="telem-header">
+                  <span class="live-dot"></span> LIVE VEHICLE TELEMETRY
+                </div>
+                <div class="telem-body">
+                  <div class="telem-metric">
+                    <span class="telem-label">VELOCITY</span>
+                    <span class="telem-val" id="telem-speed">48.2 <small>km/h</small></span>
+                  </div>
+                  <div class="telem-metric">
+                    <span class="telem-label">HEADING</span>
+                    <span class="telem-val" id="telem-heading">072° <small>ENE</small></span>
+                  </div>
+                  <div class="telem-metric">
+                    <span class="telem-label">SNAPPED ARC</span>
+                    <span class="telem-val" id="telem-arc">Arc #418</span>
+                  </div>
+                  <div class="telem-metric">
+                    <span class="telem-label">CANDIDATE MISS</span>
+                    <span class="telem-val positive" id="telem-error">0.0%</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- FLOATING LEGEND -->
+              <div class="floating-legend">
+                <div class="legend-row">
+                  <span class="swatch-symbol cyan-circle">●</span>
+                  <span class="legend-text">GPS Observations</span>
+                </div>
+                <div class="legend-row">
+                  <span class="swatch-symbol emerald-solid">━</span>
+                  <span class="legend-text">HMM Viterbi Route</span>
+                </div>
+                <div class="legend-row">
+                  <span class="swatch-symbol amber-dash">┅</span>
+                  <span class="legend-text">Classifier Baseline</span>
+                </div>
+                <div class="legend-row">
+                  <span class="swatch-symbol purple-solid">━</span>
+                  <span class="legend-text">Reference Route</span>
+                </div>
+                <div class="legend-row">
+                  <span class="swatch-symbol slate-solid">━</span>
+                  <span class="legend-text">Road Network</span>
+                </div>
+              </div>
+
+              <!-- POINT INSPECTOR DRAWER (Pops up when clicking a point) -->
+              <div class="inspector-drawer" id="inspector-card" hidden>
+                <div class="inspector-header">
+                  <span class="inspector-title" id="insp-title">GPS Observation #000</span>
+                  <button id="btn-close-insp" class="close-btn">&times;</button>
+                </div>
+                <div class="inspector-grid">
+                  <div><span>Timestamp:</span> <strong id="insp-time">+0.0 s</strong></div>
+                  <div><span>Coordinates:</span> <strong id="insp-coords">0.000, 0.000</strong></div>
+                  <div><span>Speed:</span> <strong id="insp-speed">0.0 m/s</strong></div>
+                  <div><span>Distance to Arc:</span> <strong id="insp-dist">0.0 m</strong></div>
+                  <div><span>Viterbi State:</span> <strong id="insp-viterbi" class="text-emerald">Arc #0</strong></div>
+                  <div><span>Classifier State:</span> <strong id="insp-classifier" class="text-amber">Arc #0</strong></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ANIMATED PLAYBACK CONTROLLER BAR -->
+            <div class="playback-bar">
+              <div class="playback-left">
+                <button id="btn-play-pause" class="play-btn" title="Play / Pause Simulation">
+                  <i class="fa-solid fa-play" id="play-icon"></i>
+                </button>
+                <button id="btn-stop-playback" class="step-btn" title="Stop & Reset">
+                  <i class="fa-solid fa-stop"></i>
+                </button>
+                <div class="time-display">
+                  <span id="playback-time">00:00</span> / <span id="playback-total">00:00</span>
+                </div>
+              </div>
+
+              <div class="playback-center">
+                <input
+                  type="range"
+                  id="timeline-slider"
+                  min="0"
+                  max="100"
+                  value="0"
+                  step="1"
+                  class="timeline-range"
+                />
+              </div>
+
+              <div class="playback-right">
+                <span class="speed-label">Simulation Speed:</span>
+                <div class="speed-btns">
+                  <button class="speed-pill active" data-speed="1">1x</button>
+                  <button class="speed-pill" data-speed="2">2x</button>
+                  <button class="speed-pill" data-speed="5">5x</button>
+                  <button class="speed-pill" data-speed="10">10x</button>
+                  <button class="speed-pill" data-speed="25">25x</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. CLASSIFIER VS VITERBI DIFF STUDIO -->
+          <div class="tab-pane" id="pane-diff">
+            <div class="diff-container">
+              <div class="diff-header-panel">
+                <h2>
+                  <i class="fa-solid fa-code-compare"></i> Probabilistic Decoder Improvement Analysis
+                </h2>
+                <p>
+                  Direct pointwise and topological comparison between independent Random Forest candidate classification and sequential HMM Viterbi decoding with directed network constraints.
+                </p>
+              </div>
+
+              <div class="diff-comparison-cards">
+                <!-- CARD A: CLASSIFIER ONLY -->
+                <div class="diff-card card-classifier">
+                  <div class="diff-card-header">
+                    <span class="diff-badge amber">Pointwise Baseline</span>
+                    <h3>Random Forest Classifier (Top-1)</h3>
+                  </div>
+                  <div class="diff-card-body">
+                    <div class="diff-metric-row">
+                      <span>Pointwise Accuracy:</span>
+                      <strong id="diff-clf-acc">88.56%</strong>
+                    </div>
+                    <div class="diff-metric-row">
+                      <span>Macro F1 Score:</span>
+                      <strong id="diff-clf-f1">78.20%</strong>
+                    </div>
+                    <div class="diff-metric-row">
+                      <span>Route Continuity:</span>
+                      <strong id="diff-clf-cont">93.82%</strong>
+                    </div>
+                    <div class="diff-metric-row">
+                      <span>Route Arc Jaccard:</span>
+                      <strong id="diff-clf-jaccard">67.35%</strong>
+                    </div>
+                    <div class="diff-metric-row">
+                      <span>Total Route Breaks:</span>
+                      <strong id="diff-clf-breaks" class="text-crimson">153 breaks</strong>
+                    </div>
+                    <p class="diff-explanation">
+                      Predicts each GPS observation independently using candidate emission scores. Susceptible to GPS jitter, parallel street confusion, and disconnected arc transitions.
+                    </p>
+                  </div>
+                </div>
+
+                <!-- ARROW CONNECTOR -->
+                <div class="diff-arrow">
+                  <div class="arrow-glow"></div>
+                  <i class="fa-solid fa-arrow-right"></i>
+                  <span class="viterbi-plus">+Viterbi HMM</span>
+                </div>
+
+                <!-- CARD B: CLASSIFIER + VITERBI -->
+                <div class="diff-card card-viterbi">
+                  <div class="diff-card-header">
+                    <span class="diff-badge emerald">Sequence Reconstructed</span>
+                    <h3>Random Forest + Viterbi Decoder</h3>
+                  </div>
+                  <div class="diff-card-body">
+                    <div class="diff-metric-row">
+                      <span>Pointwise Accuracy:</span>
+                      <strong id="diff-vit-acc" class="text-emerald">92.13% (+3.57%)</strong>
+                    </div>
+                    <div class="diff-metric-row">
+                      <span>Macro F1 Score:</span>
+                      <strong id="diff-vit-f1" class="text-emerald">87.46% (+9.26%)</strong>
+                    </div>
+                    <div class="diff-metric-row">
+                      <span>Route Continuity:</span>
+                      <strong id="diff-vit-cont" class="text-emerald">97.62% (+3.80%)</strong>
+                    </div>
+                    <div class="diff-metric-row">
+                      <span>Route Arc Jaccard:</span>
+                      <strong id="diff-vit-jaccard" class="text-emerald">86.52% (+19.17%)</strong>
+                    </div>
+                    <div class="diff-metric-row">
+                      <span>Total Route Breaks:</span>
+                      <strong id="diff-vit-breaks" class="text-emerald">7 breaks (-95.4%)</strong>
+                    </div>
+                    <p class="diff-explanation">
+                      Combines emission probabilities with shortest-path road network transition constraints, temporal gap calibration, and path geometry stitching to produce physically traversable routes.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- INTERACTIVE PER-TRIP COMPARISON TABLE -->
+              <div class="benchmark-table-container">
+                <div class="table-title">
+                  <i class="fa-solid fa-table-list"></i> Full 10-Trip Student-Test Results Matrix
+                </div>
+                <div class="table-responsive">
+                  <table class="data-table" id="table-student-test">
+                    <thead>
+                      <tr>
+                        <th>Trip ID</th>
+                        <th>Points</th>
+                        <th>Classifier Top-1</th>
+                        <th>Viterbi Top-1</th>
+                        <th>Top-1 Gain</th>
+                        <th>Classifier F1</th>
+                        <th>Viterbi F1</th>
+                        <th>Continuity</th>
+                        <th>Arc Jaccard</th>
+                        <th>Breaks (Clf &rarr; Vit)</th>
+                      </tr>
+                    </thead>
+                    <tbody id="benchmark-tbody">
+                      <!-- Populated dynamically by app.js -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. OFFICIAL FOLIUM MAPS EXPLORER -->
+          <div class="tab-pane" id="pane-folium">
+            <div class="folium-container">
+              <div class="folium-toolbar">
+                <div class="folium-title-group">
+                  <h3><i class="fa-solid fa-globe"></i> Interactive Folium Map Verification</h3>
+                  <span class="folium-sub">Rendered directly from Python Folium source artifacts</span>
+                </div>
+                <div class="folium-btn-group">
+                  <button class="folium-trip-btn active" data-map="00000052">
+                    <i class="fa-solid fa-map-pin"></i> Trip 00000052
+                  </button>
+                  <button class="folium-trip-btn" data-map="00000056">
+                    <i class="fa-solid fa-map-pin"></i> Trip 00000056
+                  </button>
+                  <a
+                    id="folium-open-tab"
+                    href="maps/student_trip_map_00000052.html"
+                    target="_blank"
+                    class="btn-action btn-sm"
+                  >
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i> Open in New Window
+                  </a>
+                </div>
+              </div>
+              <div class="folium-frame-wrap">
+                <iframe
+                  id="folium-frame"
+                  src="maps/student_trip_map_00000052.html"
+                  title="Folium Map Output"
+                ></iframe>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. BENCHMARK MATRIX & ANALYTICS CHARTS -->
+          <div class="tab-pane" id="pane-benchmarks">
+            <div class="benchmarks-container">
+              <div class="bench-header">
+                <h2><i class="fa-solid fa-chart-simple"></i> Empirical Evaluation & Machine Learning Analytics</h2>
+                <p>Recorded model performance, Bayesian optimization outcomes, and sequence decoding metrics across all permitted development partitions.</p>
+              </div>
+
+              <!-- CHARTS ROW -->
+              <div class="charts-row">
+                <!-- CHART 1: ACCURACY COMPARISON -->
+                <div class="chart-card">
+                  <div class="chart-card-header">
+                    <h4>Pointwise Top-1 Accuracy by Trip</h4>
+                    <span class="legend-pill"><span class="swatch blue"></span> Classifier vs <span class="swatch green"></span> Viterbi</span>
+                  </div>
+                  <div class="chart-stage">
+                    <canvas id="chart-accuracy" height="220"></canvas>
+                  </div>
+                </div>
+
+                <!-- CHART 2: ARC JACCARD & RECONSTRUCTION OVERLAP -->
+                <div class="chart-card">
+                  <div class="chart-card-header">
+                    <h4>Route Arc Jaccard Set Overlap</h4>
+                    <span class="legend-pill"><span class="swatch purple"></span> Sequence Similarity</span>
+                  </div>
+                  <div class="chart-stage">
+                    <canvas id="chart-jaccard" height="220"></canvas>
+                  </div>
+                </div>
+              </div>
+
+              <!-- BASELINE MODELS EVALUATION TABLE -->
+              <div class="model-baselines-card">
+                <div class="table-title">
+                  <i class="fa-solid fa-brain"></i> Baseline Classifier Comparison (3-Fold Grouped Cross-Validation)
+                </div>
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Model Architecture</th>
+                        <th>CV Macro F1</th>
+                        <th>Student-Test Top-1</th>
+                        <th>Student-Test F1</th>
+                        <th>Continuity</th>
+                        <th>Log Loss</th>
+                        <th>Inference Latency</th>
+                        <th>Verdict</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr class="highlight-row">
+                        <td><strong>Random Forest (Selected)</strong></td>
+                        <td><strong>0.747</strong></td>
+                        <td><strong>0.886</strong></td>
+                        <td><strong>0.782</strong></td>
+                        <td>0.938</td>
+                        <td><strong>0.518</strong></td>
+                        <td>1.11 s</td>
+                        <td><span class="badge-pill emerald">Best Generalization</span></td>
+                      </tr>
+                      <tr>
+                        <td>Histogram Boosting</td>
+                        <td>0.745</td>
+                        <td>0.883</td>
+                        <td>0.778</td>
+                        <td>0.934</td>
+                        <td>0.531</td>
+                        <td>1.45 s</td>
+                        <td><span class="badge-pill blue">Runner Up</span></td>
+                      </tr>
+                      <tr>
+                        <td>MLP Neural Classifier</td>
+                        <td>0.729</td>
+                        <td>0.871</td>
+                        <td>0.758</td>
+                        <td>0.925</td>
+                        <td>0.589</td>
+                        <td>0.92 s</td>
+                        <td><span class="badge-pill slate">Candidate Baseline</span></td>
+                      </tr>
+                      <tr>
+                        <td>Decision Tree</td>
+                        <td>0.718</td>
+                        <td>0.865</td>
+                        <td>0.744</td>
+                        <td>0.912</td>
+                        <td>1.240</td>
+                        <td>0.18 s</td>
+                        <td><span class="badge-pill slate">High Variance</span></td>
+                      </tr>
+                      <tr>
+                        <td>KNN Classifier</td>
+                        <td>0.702</td>
+                        <td>0.852</td>
+                        <td>0.729</td>
+                        <td>0.908</td>
+                        <td>0.680</td>
+                        <td>4.20 s</td>
+                        <td><span class="badge-pill slate">High Latency</span></td>
+                      </tr>
+                      <tr>
+                        <td>Logistic Regression</td>
+                        <td>0.689</td>
+                        <td>0.834</td>
+                        <td>0.712</td>
+                        <td>0.895</td>
+                        <td>0.642</td>
+                        <td>0.12 s</td>
+                        <td><span class="badge-pill slate">Linear Bound</span></td>
+                      </tr>
+                      <tr>
+                        <td>Gaussian Naive Bayes</td>
+                        <td>0.675</td>
+                        <td>0.819</td>
+                        <td>0.698</td>
+                        <td>0.881</td>
+                        <td>0.710</td>
+                        <td>0.09 s</td>
+                        <td><span class="badge-pill slate">Feature Independence</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. TWO-LAPTOP API TERMINAL & HUB -->
+          <div class="tab-pane" id="pane-terminal">
+            <div class="terminal-container">
+              <div class="terminal-header-deck">
+                <div class="term-status-block">
+                  <div class="term-badge">TWO-LAPTOP DEPLOYMENT ARCHITECTURE</div>
+                  <h3>Client-Server Network Topology</h3>
+                  <p>Inference server (FastAPI/Uvicorn) executes on Laptop 1 with trained weights and private reference evaluation; Receiving interface (Static UI) runs on Laptop 2.</p>
+                </div>
+
+                <div class="network-diagram-box">
+                  <div class="node-box">
+                    <i class="fa-solid fa-server node-icon"></i>
+                    <span class="node-title">Laptop 1: Inference</span>
+                    <span class="node-desc">FastAPI :8000</span>
+                    <span class="node-tag">Uvicorn Engine</span>
+                  </div>
+                  <div class="cable-line">
+                    <span class="cable-packet"></span>
+                    <span class="cable-label">HTTP REST JSON</span>
+                  </div>
+                  <div class="node-box">
+                    <i class="fa-solid fa-laptop-code node-icon"></i>
+                    <span class="node-title">Laptop 2: Receiver</span>
+                    <span class="node-desc">Static UI :8080</span>
+                    <span class="node-tag">Interactive HUD</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- LIVE TERMINAL CONSOLE -->
+              <div class="terminal-card">
+                <div class="terminal-topbar">
+                  <div class="terminal-lights">
+                    <span class="light red"></span>
+                    <span class="light yellow"></span>
+                    <span class="light green"></span>
+                  </div>
+                  <span class="terminal-title">CMD: PathSnap Receiver & Inference Stream (Laptop 1 & 2)</span>
+                  <button id="btn-clear-term" class="hud-icon-btn btn-xs" title="Clear Console">
+                    <i class="fa-solid fa-trash-can"></i>
+                  </button>
+                </div>
+                <div class="terminal-screen" id="terminal-screen">
+                  <div class="term-line system">[SYSTEM] PathSnap Evaluator Mode Socket initialized.</div>
+                  <div class="term-line system">[UVICORN] Started server process [PID 47079]</div>
+                  <div class="term-line success">INFO:     Application startup complete. Uvicorn running on http://0.0.0.0:8000</div>
+                  <div class="term-line info">INFO:     192.168.1.50 - "GET /health HTTP/1.1" 200 OK</div>
+                  <div class="term-line info">INFO:     192.168.1.50 - "GET /trips HTTP/1.1" 200 OK [10 trips available]</div>
+                  <div class="term-line match">INFO:     PathSnap match mode=demo trip=00000052 observations=262 prediction_ms=126.5 accuracy=0.973282</div>
+                  <div class="term-line success">INFO:     192.168.1.50 - "POST /match HTTP/1.1" 200 OK [trip_id: 00000052]</div>
+                </div>
+              </div>
+
+              <!-- QUICK TEST & CMD SNIPPETS -->
+              <div class="cmd-snippets-row">
+                <div class="snippet-box">
+                  <span class="snippet-label">Test via cURL (Receiving CMD):</span>
+                  <code>curl -X POST http://localhost:8000/match -H "Content-Type: application/json" -d '{"trip_id":"00000052"}'</code>
+                </div>
+                <div class="snippet-box">
+                  <span class="snippet-label">Test via Python CLI:</span>
+                  <code>python -c "import urllib.request, json; print(json.loads(urllib.request.urlopen('http://localhost:8000/health').read()))"</code>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- MODAL / TOAST NOTIFICATIONS -->
+    <div id="toast" class="toast-notification"></div>
+  </body>
+</html>
