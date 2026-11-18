@@ -408,7 +408,10 @@ def report(root, output="results/PathSnap-Technical-Report.pdf"):
         a, b = [r for r in comparison if r["trip"] == trip]
         picture(f"folium_{trip}.png", f"Student-test trip {trip}. Interactive map in results/student_trip_map_{trip}.html.", maximum=118*mm)
         para(f"For {trip}, the classifier had {a['breaks']} route breaks and Viterbi had {b['breaks']}. Pointwise accuracy changed from {float(a['top1']):.2%} to {float(b['top1']):.2%}. Route arc Jaccard changed from {float(a['arc_jaccard']):.2%} to {float(b['arc_jaccard']):.2%}.")
-        para("A reconstruction can rank fewer observation-level labels correctly while still connecting adjacent arcs. Breaks, overlap and pointwise accuracy capture different effects of decoding.")
+        if trip == "00000052":
+            para("Trip 00000052 was the pointwise regression example in the previous release. The current tuned model and decoder improved its pointwise accuracy. The paired figures show the current run.")
+        else:
+            para("Trip 00000056 illustrates the change in route breaks on the current student-test evaluation. Breaks, overlap and pointwise accuracy capture different effects of decoding.")
     page()
 
     heading("7 API, UI and deployment")
