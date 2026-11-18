@@ -415,7 +415,7 @@ def report(root, output="results/PathSnap-Technical-Report.pdf"):
     para("Laptop 1 serves FastAPI with the trained model and private scoring references. Laptop 2 serves a static UI. GET /trips enumerates ten inputs and POST /match scores the selected trip. The receiving console logs match requests.")
     picture("api.png", "Receiving Uvicorn log from the actual development API run, rendered from results/receiver.log.", maximum=85*mm)
     picture("ui_00000052.png", "Live student-test inference for trip 00000052.", maximum=103*mm)
-    para("All ten student-test trips were exercised over HTTP. A separate evaluator-mode development fixture isolates the reference files. Physical two-laptop operation and reserved evaluator trips require a live run on the team equipment.")
+    para("All ten student-test trips were exercised through the browser and directly over HTTP in the cloud workspace. A separate evaluator-mode development fixture isolates the reference files. Physical two-laptop operation and reserved evaluator trips require a live run on the team equipment.")
     page()
     heading("7 Browser evidence")
     for trip in ("00000056", "00000076"):

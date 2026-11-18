@@ -1,4 +1,5 @@
 """Capture browser evidence from the running student-test demo."""
+import csv
 import html
 import os
 from pathlib import Path
@@ -18,7 +19,10 @@ def capture(ui, api):
         page = browser.new_page(viewport={"width": 1280, "height": 980})
         page.goto(ui + "?api=" + api)
         page.wait_for_function("document.querySelector('#trip').options.length === 10")
-        for trip in ("00000056", "00000076", "00000052"):
+        ids = page.locator("#trip option").evaluate_all("(options) => options.map(option => option.value)")
+        ui_rows = []
+        # Finish on the short trip for the mobile and download checks.
+        for trip in [label for label in ids if label != "00000052"] + ["00000052"]:
             page.select_option("#trip", trip)
             with page.expect_response(lambda response: response.url.endswith("/match"),
                                       timeout=180000) as received:
@@ -28,7 +32,13 @@ def capture(ui, api):
             payload = response.json()
             page.get_by_text(f"Reconstructed trip {trip}.").wait_for()
             assert page.locator("#accuracy").inner_text() == f"{payload['accuracy'] * 100:.2f}%"
-            page.screenshot(path=target / f"ui_{trip}.png", full_page=True)
+            ui_rows.append((trip, payload["accuracy"], payload["observations"]))
+            if trip in {"00000052", "00000056", "00000076"}:
+                page.screenshot(path=target / f"ui_{trip}.png", full_page=True)
+        with Path("results/ui_smoke.csv").open("w", newline="") as file:
+            writer = csv.writer(file, lineterminator="\n")
+            writer.writerow(("trip", "accuracy", "observations"))
+            writer.writerows(ui_rows)
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
         page.get_by_role("checkbox", name="GPS observations").uncheck()
