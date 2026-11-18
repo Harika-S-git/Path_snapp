@@ -118,7 +118,10 @@ def compare(root, cache="cache"):
         if prefix.name in MAP_TRIPS:
             reconstructed, _ = trip.route_geometry(decoded, max_distance=settings["max_distance"],
                                                    reset_gap=settings["reset_gap"])
-            map_for(trip, reference, reconstructed).save(f"results/student_trip_map_{prefix.name}.html")
+            map_html = map_for(trip, reference, reconstructed).get_root().render()
+            destination = Path(f"results/student_trip_map_{prefix.name}.html")
+            destination.write_text("\n".join(line.rstrip() for line in map_html.splitlines()) + "\n",
+                                   encoding="utf-8")
         print(prefix.name, round(decode_seconds, 2), flush=True)
     write_csv("results/routes.csv", rows)
 
