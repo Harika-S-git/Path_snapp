@@ -69,7 +69,7 @@ All trip splits come from the organizers. Timing varies by hardware. Training us
 | Random forest | 88.60% | 77.89% | 93.86% | 65.75% |
 | Random forest + Viterbi | 91.87% | 87.21% | 97.66% | 85.70% |
 
-Three-fold grouped CV selected the random forest (macro F1 74.74%). The nine-trial Bayesian search retained the original forest configuration. The `results/` directory contains per-trip outcomes. The project archive and technical report are available with the release. [PathSnap v1.0.0](https://github.com/Harika-S-git/Path_snapp/releases/tag/v1.0.0)
+Three-fold grouped CV selected the random forest (macro F1 74.74%). The nine-trial Bayesian search retained the original forest configuration. The `results/` directory contains per-trip outcomes. Download the consolidated PDF or the tagged project archive. [Technical report](report/PathSnap-Technical-Report.pdf) · [Project ZIP](https://github.com/Harika-S-git/Path_snapp/archive/refs/tags/v1.0.0.zip)
 
 ## Submission provenance
 
