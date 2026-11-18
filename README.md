@@ -81,10 +81,10 @@ All trip splits come from the organizers. Timing varies by hardware. Training us
 
 | Method | Pointwise accuracy | Macro F1 | Route continuity | Route arc Jaccard |
 | --- | ---: | ---: | ---: | ---: |
-| Random forest | 88.60% | 77.89% | 93.86% | 65.75% |
-| Random forest + Viterbi | 91.87% | 87.21% | 97.66% | 85.70% |
+| Random forest | 88.56% | 78.20% | 93.82% | 67.35% |
+| Random forest + Viterbi | 92.13% | 87.46% | 97.62% | 86.52% |
 
-Three-fold grouped CV selected the random forest (macro F1 74.74%). The nine-trial Bayesian search retained the original forest configuration. The `results/` directory contains per-trip outcomes. Download the consolidated PDF or the tagged project archive. [Technical report](report/PathSnap-Technical-Report.pdf) · [Project ZIP](https://github.com/Harika-S-git/Path_snapp/archive/refs/tags/v1.0.0.zip)
+Three-fold grouped CV selected Random forest as the baseline (macro F1 74.74%). The best of 40 TPE trials scored 74.76%. Deployment retained the tuned configuration based on CV. Out-of-fold training calibration selected beta 8. The `results/` directory contains per-trip outcomes. Download the consolidated PDF or the tagged project archive. [Technical report](report/PathSnap-Technical-Report.pdf) · [Project ZIP](https://github.com/Harika-S-git/Path_snapp/archive/refs/tags/v1.1.0.zip)
 
 ## Submission provenance
 
