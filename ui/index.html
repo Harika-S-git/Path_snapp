@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PathSnap · Route reconstruction</title>
+    <link rel="stylesheet" href="style.css" />
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <header>
+      <div class="mark" aria-hidden="true">⌁</div>
+      <strong>PathSnap</strong><span id="mode">Connecting</span>
+    </header>
+    <main>
+      <section class="intro">
+        <h1>Route reconstruction</h1>
+        <p>Match GPS observations to a directed road network.</p>
+      </section>
+      <section class="controls" aria-label="Inference controls">
+        <form id="connection">
+          <label for="api">Inference server</label>
+          <div class="field">
+            <input id="api" type="url" required /><button class="secondary">
+              Connect
+            </button>
+          </div>
+        </form>
+        <form id="inference">
+          <label for="trip">Trip</label>
+          <div class="field">
+            <select id="trip" disabled>
+              <option>Connect to a server</option></select
+            ><button id="run" disabled>Reconstruct route</button>
+          </div>
+        </form>
+      </section>
+      <p id="status" role="status">Connecting to the inference server…</p>
+      <section class="metrics" aria-label="Match results">
+        <div>
+          <span>Pointwise accuracy</span><strong id="accuracy">–</strong>
+        </div>
+        <div>
+          <span>GPS observations</span><strong id="observations">–</strong>
+        </div>
+        <div><span>Route segments</span><strong id="segments">–</strong></div>
+        <div><span>Inference time</span><strong id="duration">–</strong></div>
+      </section>
+      <section class="map-panel">
+        <div class="map-bar">
+          <h2>Route map</h2>
+          <div class="layers">
+            <label
+              ><input id="gps" type="checkbox" checked /> GPS
+              observations</label
+            ><label
+              ><input id="route" type="checkbox" checked /> Predicted
+              route</label
+            >
+          </div>
+        </div>
+        <div class="map">
+          <canvas
+            id="map"
+            aria-label="Geographical plot of GPS observations and predicted road segments"
+          ></canvas>
+          <p id="placeholder">Select a trip to view its route.</p>
+        </div>
+        <div class="map-footer">
+          <span id="extent"></span
+          ><button id="download" class="secondary" disabled>
+            Download prediction
+          </button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

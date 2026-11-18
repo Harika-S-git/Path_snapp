@@ -1,0 +1,6 @@
+-r requirements-api.txt
+optuna==5.1.0
+folium==1.0.0
+matplotlib==3.10.8
+reportlab==5.1.0
+playwright==1.65.2
