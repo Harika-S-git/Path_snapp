@@ -125,40 +125,48 @@ class Trip:
         return distance, parent
 
     def decode(self, ids, fractions, probabilities, beta=20, reset_gap=90, max_distance=2000):
+        return self.decode_betas(ids, fractions, probabilities, (beta,), reset_gap, max_distance)[0]
+
+    def decode_betas(self, ids, fractions, probabilities, betas, reset_gap=90, max_distance=2000):
+        """Reuse the directed transition distances across decoder calibrations."""
         log_emission = np.log(np.clip(probabilities, 1e-12, 1))
+        betas = np.asarray(betas)
         n, k = ids.shape
-        back = np.zeros((n, k), dtype=int)
-        score = log_emission[0]
+        back = np.zeros((n, len(betas), k), dtype=np.intp)
+        score = np.broadcast_to(log_emission[0], (len(betas), k))
+        batch = np.arange(len(betas))
+        candidates = np.arange(k)
         for i in range(1, n):
             gap = self.track[i, 2] - self.track[i - 1, 2]
-            step = np.linalg.norm(self.xy[i] - self.xy[i - 1])
             if gap > reset_gap:
-                back[i] = score.argmax()
-                score = log_emission[i]
+                back[i] = score.argmax(axis=1)[:, None]
+                score = np.broadcast_to(log_emission[i], score.shape)
                 continue
+            step = np.linalg.norm(self.xy[i] - self.xy[i - 1])
             previous, current = ids[i - 1], ids[i]
-            cost = np.full((k, k), -8.0)
             cap = min(max_distance, max(120.0, step * 3 + 70, gap * 35))
+            heads = self.arcs[current, 0]
+            offset = fractions[i] * self.length[current]
+            forward = np.empty((k, k))
             for a, arc in enumerate(previous):
                 distances, _ = self.paths(int(self.arcs[arc, 1]), max_distance)
-                for b, other in enumerate(current):
-                    remainder = (1 - fractions[i - 1, a]) * self.length[arc]
-                    forward = distances.get(self.arcs[other, 0], np.inf) + remainder
-                    forward += fractions[i, b] * self.length[other]
-                    if arc == other:
-                        forward = min(forward, abs(fractions[i, b] - fractions[i - 1, a]) * self.length[arc])
-                    if forward <= cap:
-                        cost[a, b] = -abs(forward - step) / (beta + .3 * gap)
-            cost -= np.logaddexp.reduce(cost, axis=1)[:, None]
-            joint = score[:, None] + cost
-            back[i] = joint.argmax(axis=0)
-            score = joint[back[i], np.arange(k)] + log_emission[i]
-        index = score.argmax()
-        path = np.empty(n, dtype=int)
+                remainder = (1 - fractions[i - 1, a]) * self.length[arc]
+                network = np.fromiter((distances.get(head, np.inf) for head in heads), float, count=k)
+                direct = abs(fractions[i] - fractions[i - 1, a]) * self.length[arc]
+                via_network = (network + remainder) + offset
+                forward[a] = np.where(current == arc, np.minimum(via_network, direct), via_network)
+            cost = np.where(forward <= cap,
+                            -abs(forward - step) / (betas[:, None, None] + .3 * gap), -8.0)
+            cost -= np.logaddexp.reduce(cost, axis=2)[:, :, None]
+            joint = score[:, :, None] + cost
+            back[i] = joint.argmax(axis=1)
+            score = joint[batch[:, None], back[i], candidates] + log_emission[i]
+        index = score.argmax(axis=1)
+        paths = np.empty((len(betas), n), dtype=int)
         for i in range(n - 1, -1, -1):
-            path[i] = ids[i, index]
-            index = back[i, index]
-        return path
+            paths[:, i] = ids[i, index]
+            index = back[i, batch, index]
+        return paths
 
     def route_geometry(self, states, max_distance=2000, reset_gap=90):
         route = [int(states[0])]

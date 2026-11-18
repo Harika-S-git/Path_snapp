@@ -11,7 +11,7 @@ import numpy as np
 
 from .core import Trip, probabilities
 from .data import prefixes
-from .train import observation_stats
+from .train import fit, load_partition, observation_stats
 
 
 def measure(trip, truth, route, states, config):
@@ -65,24 +65,37 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
-def compare(root):
+MAP_TRIPS = ("00000052", "00000056")
+BETAS = (8.0, 14.0, 20.0, 35.0)
+
+
+def compare(root, cache="cache"):
     bundle = joblib.load("artifacts/model.joblib")
     model, config = bundle["model"], bundle["decoder"]
-    # Tune on deterministic training-route samples only. Model selection and
-    # classifier hyperparameter tuning have already completed at this point.
-    sample = sorted(prefixes(root, "train"), key=lambda p: (p.with_suffix(".track").stat().st_size, p.name))[:8]
+    folds = json.loads(Path("results/models.json").read_text())["folds"]
+    train = dict(load_partition(cache, "train"))
+    networks = {prefix.name: prefix for prefix in prefixes(root, "train")}
+    validation_ids = [label for fold in folds for label in fold]
+    if len(validation_ids) != len(train) or set(validation_ids) != train.keys() or train.keys() != networks.keys():
+        raise ValueError("Decoder calibration requires the same training trips and folds as training")
     tuning = []
-    for prefix in sample:
-        trip = Trip(prefix)
-        ids, fractions, features = trip.candidates()
-        p = probabilities(model, features)
-        reference, truth = trip.reference(prefix)
-        for beta in (8.0, 14.0, 20.0, 35.0):
-            settings = dict(config, beta=beta)
-            decoded = trip.decode(ids, fractions, p, **settings)
-            tuning.append(dict(trip=prefix.name, beta=beta, **measure(trip, truth, reference, decoded, settings)))
+    for fold_index, validation in enumerate(folds, 1):
+        held_out = set(validation)
+        fold_model = fit(bundle["name"], bundle["config"],
+                         [(label, trip) for label, trip in train.items() if label not in held_out])
+        for label in validation:
+            trip = Trip(networks[label])
+            cached = train[label]
+            ids = cached["ids"]
+            p = probabilities(fold_model, cached["features"])
+            decoded = trip.decode_betas(ids, cached["fraction"], p, BETAS,
+                                        reset_gap=config["reset_gap"], max_distance=config["max_distance"])
+            for beta, states in zip(BETAS, decoded):
+                tuning.append(dict(fold=fold_index, trip=label, beta=beta,
+                                   **observation_stats(cached["truth"], states)))
+            print(f"OOF fold {fold_index} trip {label}", flush=True)
     write_csv("results/decoder_search.csv", tuning)
-    selected = max((8., 14., 20., 35.), key=lambda beta: np.mean(
+    selected = max(BETAS, key=lambda beta: np.mean(
         [r["macro_f1"] for r in tuning if r["beta"] == beta]))
     settings = dict(config, beta=selected)
     bundle["decoder"] = settings
@@ -102,13 +115,13 @@ def compare(root):
         for name, states, seconds in (("Classifier", classifier, base_seconds), ("Viterbi", decoded, decode_seconds)):
             rows.append(dict(trip=prefix.name, method=name, seconds=seconds,
                              **measure(trip, truth, reference, states, settings)))
-        if prefix.name == "00000052":
+        if prefix.name in MAP_TRIPS:
             reconstructed, _ = trip.route_geometry(decoded, max_distance=settings["max_distance"],
                                                    reset_gap=settings["reset_gap"])
-            map_for(trip, reference, reconstructed).save("results/student_trip_map.html")
+            map_for(trip, reference, reconstructed).save(f"results/student_trip_map_{prefix.name}.html")
         print(prefix.name, round(decode_seconds, 2), flush=True)
     write_csv("results/routes.csv", rows)
 
 
 if __name__ == "__main__":
-    compare(sys.argv[1])
+    compare(*sys.argv[1:])
