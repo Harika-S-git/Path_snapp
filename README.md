@@ -1,4 +1,4 @@
-# PathSnap – Intelligent GPS Map Matching Using Machine Learning
+ # PathSnap – Intelligent GPS Map Matching Using Machine Learning
 
 PathSnap is a machine-learning-powered GPS map-matching system that reconstructs realistic travel routes from noisy and time-stamped GPS observations. It identifies the most likely directed road segments for each GPS point and combines supervised machine learning with probabilistic sequence decoding to generate continuous, network-consistent routes.
 
