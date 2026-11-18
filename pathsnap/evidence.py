@@ -53,7 +53,7 @@ def capture(ui, api):
             page.screenshot(path=target / f"folium_{trip}.png")
         page.set_viewport_size({"width": 1550, "height": 620})
         receiver = Path("results/receiver.log").read_text().splitlines()
-        requests = [line for line in receiver if "PathSnap match " in line or "POST /match" in line]
+        requests = [line for line in receiver if "PathSnap match " in line or ("POST /match" in line and "200 OK" in line)]
         assert len([line for line in requests if "PathSnap match " in line]) >= 10
         page.set_content(
             '<body style="background:#101916;color:#d8f2e2;padding:26px;font:15px monospace">'

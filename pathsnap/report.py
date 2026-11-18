@@ -37,9 +37,9 @@ MODELS = {
     "Histogram boosting": ("Gradient-boosted tree ensemble", "Binary log loss",
                            "Shallow additive trees can capture nonlinear feature interactions and refine ambiguous rankings. Capacity depends on iteration count and leaf size, and fit-time cost rises with both."),
     "KNN": ("Instance-based classifier", "Distance-weighted voting with no fitted training loss",
-            "Scaled geometric features let similar candidate contexts vote together. Prediction requires a neighbour search and can depend on coverage of rare road situations in the sample."),
+            "Distance-weighted Euclidean neighbours vote in standardised feature space. Prediction requires a neighbour search and can depend on coverage of rare road situations in the sample."),
     "MLP": ("Feed-forward neural classifier", "Binary log loss with L2 regularisation",
-            "The two hidden layers can represent interactions between movement and road geometry. Early stopping uses internal candidate-row accuracy, which can include rows from the same trips in both internal subsets."),
+            "Adam optimises two hidden layers, initially 64 and 32 units, to represent interactions between movement and road geometry. Early stopping uses internal candidate-row accuracy, which can include rows from the same trips in both internal subsets."),
 }
 
 
@@ -413,12 +413,13 @@ def report(root, output="results/PathSnap-Technical-Report.pdf"):
 
     heading("7 API, UI and deployment")
     para("Laptop 1 serves FastAPI with the trained model and private scoring references. Laptop 2 serves a static UI. GET /trips enumerates ten inputs and POST /match scores the selected trip. The receiving console logs match requests.")
-    picture("api.png", "Receiving Uvicorn log from the actual development API run, rendered from results/receiver.log.", maximum=95*mm)
+    picture("api.png", "Receiving Uvicorn log from the actual development API run, rendered from results/receiver.log.", maximum=85*mm)
+    picture("ui_00000052.png", "Live student-test inference for trip 00000052.", maximum=103*mm)
     para("All ten student-test trips were exercised over HTTP. A separate evaluator-mode development fixture isolates the reference files. Physical two-laptop operation and reserved evaluator trips require a live run on the team equipment.")
     page()
     heading("7 Browser evidence")
-    for trip in ("00000052", "00000056", "00000076"):
-        picture(f"ui_{trip}.png", f"Live student-test inference for trip {trip}.", maximum=69*mm)
+    for trip in ("00000056", "00000076"):
+        picture(f"ui_{trip}.png", f"Live student-test inference for trip {trip}.", maximum=107*mm)
     page()
     heading("Reproducibility and authorship")
     para("The repository contains the source pipeline, saved model, configuration, logged results, plots, and commands for recreating the Folium map and this report. Raw dataset files and private evaluator references belong on the team machines.")
