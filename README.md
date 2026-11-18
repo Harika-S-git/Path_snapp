@@ -34,6 +34,19 @@ Start the interface in a second terminal with `python -m http.server 8080 --dire
 4. Copy `ui/` to laptop 2 and run the static server there. Open http://localhost:8080, enter `http://<laptop-1-address>:8000` in **Inference server**, click **Connect**, and pick any displayed trip. The receiving terminal logs the trip ID, inferred observation count, prediction time, and accuracy. To restrict cross-origin calls, set `PATHSNAP_UI_ORIGINS=http://localhost:8080` on laptop 1 before starting the API.
 5. For diagnostics, GET `/health`, then GET `/trips`. POST `/match` with a JSON body containing `trip_id`. See `/docs` for the live OpenAPI interface.
 
+For laptop 1 in PowerShell, run these commands with the real evaluator paths.
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-api.txt
+$env:PATHSNAP_MODE = "evaluator"
+$env:PATHSNAP_TRIPS = "<folder with ten evaluator trips>"
+$env:PATHSNAP_REFERENCES = "<server-only folder with .route files>"
+.\.venv\Scripts\python.exe -m uvicorn pathsnap.api:app --host 0.0.0.0 --port 8000
+```
+
+Run `ipconfig` in another terminal and use the active LAN adapter's IPv4 address in the browser on laptop 2. Match all ten trips and capture the UI results and laptop 1 terminal output before closing the server. The reserved inputs and references belong on the evaluation machine.
+
 The source data has route-level arc labels. Server accuracy uses per-observation pseudo-labels derived by monotone alignment to that reference route. Geometry is longitude/latitude in JSON. The download contains predicted arc IDs and geometry, GPS observations, break positions, and aggregate accuracy.
 
 ## Reproduce the experiments
@@ -43,10 +56,12 @@ Run from the project root with the extracted student dataset.
 ```bash
 python -m pip install -r requirements.txt
 export OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
+# Create the feature cache if it is missing.
 python -m pathsnap.data "Student folder" cache
 python -m pathsnap.train cache "Student folder"
-python -m pathsnap.routes "Student folder"
-# With the demo running, capture the actual integration evidence.
+python -m pathsnap.routes "Student folder" cache
+# Start the demo API and redirect its receiving console to results/receiver.log.
+# With the API and UI running, capture the actual integration evidence.
 python -m pathsnap.smoke http://127.0.0.1:8000 > results/api_smoke.txt
 python -m playwright install chromium
 python -m pathsnap.evidence http://localhost:8080 http://127.0.0.1:8000
@@ -56,11 +71,11 @@ python -m pathsnap.report "Student folder"
 - `pathsnap/core.py` contains the local metric projection, candidate generation, features, directed transition graph, Viterbi recurrence, and route stitching.
 - `pathsnap/alignment.py` contains the monotone dynamic program for assigning pseudo-labels to observations.
 - `results/inventory.csv` records file availability, coordinate ranges, sampling, and network connectivity for each development trip.
-- `results/models.json` records model configuration, grouped CV scores, test metrics, candidate confusion matrices, and timing. `results/search.csv` records the nine TPE trials.
-- `results/routes.csv` records the classifier and decoder comparison per student-test trip. `results/decoder_search.csv` records the training-only beta sweep.
-- Run the route comparison to generate `results/student_trip_map.html` for the Folium visualisation. Leaflet resources and the optional OpenStreetMap basemap use network access.
+- `results/models.json` records model configuration, grouped CV scores, test metrics, candidate confusion matrices, and timing. `results/search.csv` records the 40 TPE trials. `results/mlp_history.csv` records the MLP training loss and internal validation accuracy.
+- `results/routes.csv` records the classifier and decoder comparison per student-test trip. `results/decoder_search.csv` records the training-only beta sweep with out-of-fold emissions for all 80 training trips.
+- Open `results/student_trip_map_00000052.html` and `results/student_trip_map_00000056.html` for the Folium visualisations. Leaflet resources and the optional OpenStreetMap basemap use network access.
 
-All trip splits come from the organizers. Timing varies by hardware. Training uses at most 180,000 candidate rows per fit with a fixed seed. Candidate log loss is conditional on the pseudo-label being in the shortlist. Observation-level macro metrics average over road arc labels within each trip and then over trips, since arc IDs are local to each network.
+All trip splits come from the organizers. Timing varies by hardware. Training uses at most 180,000 candidate rows per fit with a fixed seed. KNN uses at most 12,000 rows per fit to bound neighbour search. Model deployment uses grouped-CV macro F1 and keeps the baseline if it scores higher. Candidate log loss is conditional on the pseudo-label being in the shortlist. Observation-level macro metrics average over road arc labels within each trip and then over trips, since arc IDs are local to each network.
 
 ## Recorded student-test results
 
@@ -73,4 +88,4 @@ Three-fold grouped CV selected the random forest (macro F1 74.74%). The nine-tri
 
 ## Submission provenance
 
-The implementation and report draft were produced with Codex assistance. Figures and metrics come from the code and recorded experiment runs. Use the report together with the run logs and source when reviewing and explaining the submission. The reserved data and a physical two-laptop test were unavailable during development.
+The Gradient Gang supplied requirements and revision requests and demonstrated the initial Windows run. Codex implemented the pipeline, ran experiments and integration checks, and produced the figures and report. Figures and metrics come from the code and recorded experiment runs. Use the report together with the run logs and source when reviewing and explaining the submission. The reserved data and a physical two-laptop test were unavailable during development.

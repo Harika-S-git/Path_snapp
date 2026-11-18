@@ -15,7 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from .core import Trip
+from .core import Trip, load
 from .data import prefixes
 
 R = Path("results")
@@ -36,6 +36,10 @@ MODELS = {
                       "Averaging trees captures interactions while reducing split variance. More trees carry extra inference and storage cost."),
     "Histogram boosting": ("Gradient-boosted tree ensemble", "Binary log loss",
                            "Shallow additive trees can capture nonlinear feature interactions and refine ambiguous rankings. Capacity depends on iteration count and leaf size, and fit-time cost rises with both."),
+    "KNN": ("Instance-based classifier", "Distance-weighted voting with no fitted training loss",
+            "Scaled geometric features let similar candidate contexts vote together. Prediction requires a neighbour search and can depend on coverage of rare road situations in the sample."),
+    "MLP": ("Feed-forward neural classifier", "Binary log loss with L2 regularisation",
+            "The two hidden layers can represent interactions between movement and road geometry. Early stopping uses internal candidate-row accuracy, which can include rows from the same trips in both internal subsets."),
 }
 
 
@@ -44,7 +48,45 @@ def read_csv(name):
         return list(csv.DictReader(file))
 
 
-def plots(root, models, inventory, comparison):
+def track_quality(root, inventory):
+    quality, samples = {}, {}
+    for partition in ("train", "student_test"):
+        rows = [r for r in inventory if r["partition"] == partition]
+        gaps, missing = [], 0
+        for prefix in prefixes(root, partition):
+            raw = load(prefix, ".track", 3)
+            missing += int((~np.isfinite(raw)).sum())
+            valid = (np.isfinite(raw).all(axis=1) & (abs(raw[:, 0]) <= 180)
+                     & (abs(raw[:, 1]) <= 90))
+            gaps.append(np.diff(np.sort(raw[valid, 2])))
+        samples[partition] = np.concatenate(gaps)
+        quality[partition] = [partition, sum(int(r["invalid"]) for r in rows), missing,
+                              sum(int(r["duplicates"]) for r in rows),
+                              sum(int(r["reversals"]) for r in rows),
+                              int((samples[partition] > 10).sum())]
+    return quality, samples
+
+
+def fit_diagnostic(model, models):
+    by_name = {row["model"]: row for row in models}
+    name = model["model"]
+    comparator, takeaway = {
+        "Logistic": ("Decision tree", "The tree's higher CV score is consistent with the linear model missing useful feature interactions."),
+        "Gaussian NB": ("Logistic", "The two simple models have similar CV F1, despite their different probability assumptions. Covered log loss checks how well the independence model ranks the correct arc."),
+        "Decision tree": ("Random forest", "The forest's advantage measures the gain from using a larger ensemble under the same fold split."),
+        "Random forest": ("Histogram boosting", "The two ensemble scores are close relative to their fold spreads, so their ranking is sensitive to trip composition."),
+        "Histogram boosting": ("Decision tree", "The CV difference from a single tree measures the gain of additive trees. The small train-to-CV gap limits evidence of a large generalisation penalty."),
+        "KNN": ("Decision tree", "The comparison includes a smaller KNN fitting sample. Its CV score therefore reflects both the neighbour rule and available sample coverage."),
+        "MLP": ("Histogram boosting", "The internal accuracy curve guides early stopping; the trip-held-out F1 gives the more relevant generalisation estimate."),
+    }[name]
+    delta = model["cv_macro_f1"] - by_name[comparator]["cv_macro_f1"]
+    gap = model["train_macro_f1"] - model["cv_macro_f1"]
+    low, high = min(model["cv"]), max(model["cv"])
+    return (f"Training minus CV F1 was {gap:+.3f}. The fold range was {low:.3f} to {high:.3f}. "
+            f"The CV difference versus {comparator} was {delta:+.3f}. {takeaway}")
+
+
+def plots(root, models, inventory, comparison, samples):
     F.mkdir(exist_ok=True)
     plt.rcParams.update({"font.size": 10, "axes.spines.top": False,
                          "axes.spines.right": False, "figure.dpi": 145})
@@ -60,6 +102,44 @@ def plots(root, models, inventory, comparison):
     plt.tight_layout()
     plt.savefig(F / "inventory.png")
     plt.close()
+
+    fig, (components, network) = plt.subplots(1, 2, figsize=(9, 3.2))
+    fig_gap, gap_ax = plt.subplots(figsize=(9, 2.9))
+    component_max = max(int(row["weak_components"]) for row in inventory)
+    gap_max = max(float(values.max()) for values in samples.values())
+    bins = np.geomspace(min(values[values > 0].min() for values in samples.values()), gap_max, 28)
+    for partition, color in (("train", GREEN), ("student_test", BLUE)):
+        rows = [r for r in inventory if r["partition"] == partition]
+        components.hist([int(row["weak_components"]) for row in rows],
+                        bins=np.geomspace(1, component_max + 1, 19), histtype="step",
+                        color=color, label=partition)
+        network.scatter([int(row["nodes"]) for row in rows], [int(row["arcs"]) for row in rows],
+                        s=17, alpha=.65, color=color, label=partition)
+        gap_ax.hist(samples[partition][samples[partition] > 0], bins=bins,
+                    histtype="step", color=color, label=partition)
+    components.set(xscale="log", xlabel="Weak components per trip", ylabel="Trips")
+    network.set(xscale="log", yscale="log", xlabel="Nodes per trip", ylabel="Directed arcs per trip")
+    gap_ax.set(xscale="log", yscale="log", xlabel="Positive sampling gap (seconds)", ylabel="Intervals")
+    for ax in (components, network, gap_ax):
+        ax.legend(frameon=False)
+    for fig, name in ((fig, "connectivity.png"), (fig_gap, "sampling_gaps.png")):
+        fig.tight_layout()
+        fig.savefig(F / name)
+        plt.close(fig)
+
+    fig, (loss, accuracy) = plt.subplots(1, 2, figsize=(9, 3))
+    history = read_csv("mlp_history.csv")
+    for variant in dict.fromkeys(row["variant"] for row in history):
+        rows = [row for row in history if row["variant"] == variant]
+        epochs = [int(row["epoch"]) for row in rows]
+        loss.plot(epochs, [float(row["training_loss"]) for row in rows], label=variant)
+        accuracy.plot(epochs, [float(row["validation_accuracy"]) for row in rows], label=variant)
+    for ax, label in ((loss, "Training loss"), (accuracy, "Validation accuracy")):
+        ax.set(xlabel="Epoch", ylabel=label)
+        ax.legend(frameon=False)
+    fig.tight_layout()
+    fig.savefig(F / "mlp_history.png")
+    plt.close(fig)
 
     trip = Trip(next(p for p in prefixes(root, "student_test") if p.name == "00000052"))
     fig, ax = plt.subplots(figsize=(8, 3.8))
@@ -95,7 +175,7 @@ def plots(root, models, inventory, comparison):
     fig.savefig(F / "models.png")
     plt.close(fig)
 
-    fig, axes = plt.subplots(1, len(models), figsize=(11, 2.6))
+    fig, axes = plt.subplots(1, len(models), figsize=(14, 2.6))
     for ax, model in zip(axes, models):
         matrix = np.asarray(model["confusion"])
         ax.imshow(matrix, cmap="Greens")
@@ -144,7 +224,15 @@ def report(root, output="results/PathSnap-Technical-Report.pdf"):
     models, tuned = logging["baselines"], logging["tuned"]
     comparison = read_csv("routes.csv")
     settings = json.loads((R / "decoder_config.json").read_text())
-    plots(root, models, inventory, comparison)
+    team = json.loads(Path("report/team.json").read_text())
+    authors = ", ".join(team["members"])
+    quality, samples = track_quality(root, inventory)
+    with (R / "data_quality.csv").open("w", newline="") as file:
+        writer = csv.writer(file, lineterminator="\n")
+        writer.writerow(["partition", "invalid_rows", "non_finite_cells", "duplicate_timestamps",
+                         "timestamp_reversals", "gaps_over_10_seconds"])
+        writer.writerows(quality.values())
+    plots(root, models, inventory, comparison, samples)
     style = getSampleStyleSheet()
     style["Normal"].fontName = "Helvetica"
     style["Normal"].textColor = colors.HexColor(INK)
@@ -187,6 +275,7 @@ def report(root, output="results/PathSnap-Technical-Report.pdf"):
         story.append(PageBreak())
 
     heading("PathSnap technical report")
+    para(f"{team['name']} | {authors}")
     para("Directed road matching with learned candidate probabilities and sequential decoding. UE24CS352A Machine Learning hackathon.")
     heading("2.2 Dataset and exploratory analysis", 2)
     para("The supplied development package contains 80 training trips and ten student-test trips. Every trip has a GPS track (longitude, latitude, seconds), node coordinates, directed arcs indexed by row and an ordered reference route of arc IDs. The reserved evaluator partition was absent and excluded from development.")
@@ -206,9 +295,16 @@ def report(root, output="results/PathSnap-Technical-Report.pdf"):
     isolated = sum(int(r["isolated"]) for r in inventory)
     breaks = sum(int(r["reference_breaks"]) for r in inventory)
     worst = max(inventory, key=lambda r: float(r["maximum_gap"]))
-    para(f"Across both development partitions, the inventory recorded {reversals:,} timestamp reversals, {duplicates:,} zero-second intervals, {isolated:,} isolated nodes summed over trip graphs and {breaks:,} non-adjacent steps in supplied routes. The largest gap was in {worst['partition']} trip {worst['trip']}. The inventory includes per-file sizes and coordinate bounds.")
+    para(f"Across both development partitions, the inventory recorded {reversals:,} timestamp reversals, {duplicates:,} zero-second intervals, {isolated:,} isolated nodes summed over trip graphs and {breaks:,} non-adjacent steps in supplied routes. The largest gap was {float(worst['maximum_gap']):,.0f} seconds in {worst['partition']} trip {worst['trip']}. The decoder resets beyond 90 seconds. The {breaks:,} non-adjacent reference steps remain in the supplied route for alignment and are counted as reference discontinuities. The inventory includes per-file sizes and coordinate bounds.")
     para("Preprocessing drops non-finite or out-of-range GPS readings, preserves duplicate timestamps, stable-sorts valid readings and validates arc endpoints. A trip-centred equirectangular projection scales longitude by the cosine of the median latitude, giving locally meaningful metric distances for the observed extents.")
     picture("inventory.png", "Figure 1. Trip size and road-network size in both permitted development partitions.", maximum=81*mm)
+    page()
+
+    heading("2.2 Data quality and connectivity")
+    table(["Partition", "Invalid rows", "Non-finite cells", "0 s gaps", "Reversals", "Gaps >10 s"],
+          list(quality.values()), [30, 26, 31, 25, 25, 29])
+    picture("connectivity.png", "Weak components and graph sizes, by development partition.", maximum=63*mm)
+    picture("sampling_gaps.png", "Positive intervals after sorting valid timestamps within trips. Zero intervals are counted in the table.", maximum=60*mm)
     page()
 
     heading("2.2 Geometry, features and labels")
@@ -221,51 +317,59 @@ def report(root, output="results/PathSnap-Technical-Report.pdf"):
     page()
 
     heading("3.1 Model comparison")
-    para("All five baselines used identical features and the same three GroupKFold splits of the 80 training trips. Grouping is by trip ID. Fits use up to 180,000 deterministically sampled candidate rows. The selected model maximises mean grouped-CV observation-level macro F1, which gives infrequent arcs a voice in model selection.")
+    para("All seven baselines used identical features and the same three GroupKFold splits of the 80 training trips. Grouping is by trip ID. Fits use up to 180,000 deterministically sampled candidate rows. KNN uses at most 12,000 to bound prediction cost. The selected model maximises mean grouped-CV observation-level macro F1, which gives infrequent arcs a voice in model selection.")
     table(["Model", "CV F1", "Test top-1", "Test F1", "Continuity", "Log loss", "Infer ms"],
           [[m["model"], f"{m['cv_macro_f1']:.3f}", f"{m['top1']:.3f}", f"{m['macro_f1']:.3f}",
             f"{m['continuity']:.3f}", f"{m['log_loss']:.3f}", f"{m['inference_ms']:.1f}"] for m in models],
           [43, 19, 23, 19, 23, 20, 22])
+    picture("models.png", "Figure 3. Baseline model comparison. Dots in the first panel are actual fold scores.", maximum=43*mm)
+    page()
+    heading("3.1 Student-test candidate diagnostics")
     table(["Model", "Test macro precision", "Test macro recall", "Full fit seconds"],
           [[m["model"], f"{m['macro_precision']:.3f}", f"{m['macro_recall']:.3f}",
             f"{m['fit_seconds']:.2f}"] for m in models], [53, 39, 37, 40])
-    picture("models.png", "Figure 3. Baseline model comparison. Dots in the first panel are actual fold scores.", maximum=43*mm)
     picture("confusion.png", "Figure 4. Candidate-level confusion matrices. One arc per observation is selected; the target is positive only for a correct shortlist member.", maximum=39*mm)
     winner = max(models, key=lambda m: m["cv_macro_f1"])
     runner = sorted(models, key=lambda m: m["cv_macro_f1"])[-2]
-    para(f"{winner['model']} led {runner['model']} by {winner['cv_macro_f1']-runner['cv_macro_f1']:.4f} mean CV F1. The narrow margin and fold-to-fold variability shown in Figure 3 limit confidence in the ranking.")
+    para(f"{winner['model']} led {runner['model']} by {winner['cv_macro_f1']-runner['cv_macro_f1']:.4f} mean CV F1. The fold scores in Figure 3 show how rankings vary with the validation trips.")
     page()
 
     heading("3.2 Individual model experiments")
-    for m in models:
+    for index, m in enumerate(models):
+        if index and index % 3 == 0:
+            page()
+            heading("3.2 Individual model experiments")
         family, objective, why = MODELS[m["model"]]
         heading(m["model"], 2)
         para(f"{family}. The training objective is {objective.lower()}. {why}")
         config = ", ".join(f"{key}={value:g}" for key, value in m["config"].items())
-        gap = m["train_macro_f1"] - m["cv_macro_f1"]
-        evidence = ("This gap is consistent with some overfitting." if gap > .025 else
-                    "This gap provides limited evidence of overfitting.")
-        para(f"The initial configuration used {config}. Student test Top-1 {m['top1']:.3f}, macro F1 {m['macro_f1']:.3f}, covered log loss {m['log_loss']:.3f}. Full-training F1 {m['train_macro_f1']:.3f}, grouped CV F1 {m['cv_macro_f1']:.3f} (gap {gap:+.3f}). {evidence}")
-    para("These classifiers yield no logged epoch-wise training histories in this experiment. The comparison uses measured fold scores and test-set probability loss.")
+        para(f"The initial configuration used {config}. Student-test Top-1 was {m['top1']:.3f}, macro F1 was {m['macro_f1']:.3f}, and covered log loss was {m['log_loss']:.3f}. Full-training F1 was {m['train_macro_f1']:.3f} and grouped CV F1 was {m['cv_macro_f1']:.3f}.")
+        para(fit_diagnostic(m, models))
+    picture("mlp_history.png", "MLP full-fit epoch history. Validation accuracy is on its internal training-row split. Grouped CV remains trip-disjoint.", maximum=68*mm)
     page()
 
     heading("4 Bayesian hyperparameter optimisation")
     base = next(m for m in models if m["model"] == tuned["model"])
-    para(f"{tuned['model']} led the baseline comparison at CV macro F1 {base['cv_macro_f1']:.4f}. Optuna's Tree-structured Parzen Estimator ran nine trials with seed {logging['seed']}, including the baseline configuration and three startup trials in total. It maximised mean macro F1 over the same three trip-grouped folds. Total search time was {logging['search_seconds']:.1f} s.")
+    para(f"{tuned['model']} led the baseline comparison at CV macro F1 {base['cv_macro_f1']:.4f}. Optuna's Tree-structured Parzen Estimator ran {len(read_csv('search.csv'))} trials with seed {logging['seed']} and ten startup trials. The baseline was evaluated separately. It maximised mean macro F1 over the same three trip-grouped folds. Total search time was {logging['search_seconds']:.1f} s.")
     for name, space in logging["search_space"].items():
         para(f"The search used {space} for {name} and selected {tuned['config'][name]:.5g}.")
     table(["Variant", "CV F1", "Test top-1", "Test F1", "Test log loss", "Infer ms"],
           [[label, f"{m['cv_macro_f1']:.4f}", f"{m['top1']:.4f}", f"{m['macro_f1']:.4f}",
             f"{m['log_loss']:.4f}", f"{m['inference_ms']:.2f}"]
            for label, m in [("Untuned", base), ("Tuned", tuned)]], [35, 25, 28, 25, 31, 25])
-    para(f"Tuning changed CV macro F1 by {tuned['cv_macro_f1']-base['cv_macro_f1']:+.4f} and student-test macro F1 by {tuned['macro_f1']-base['macro_f1']:+.4f}. The deployed bundle uses the configuration selected by the training-only CV objective.")
+    para(f"Tuning changed CV macro F1 by {tuned['cv_macro_f1']-base['cv_macro_f1']:+.4f} and student-test macro F1 by {tuned['macro_f1']-base['macro_f1']:+.4f}. The deployed variant was {logging['deployed_variant']}, selected by training-only CV macro F1. A CV tie favours the tuned variant. Student-test scores were excluded from the deployment decision.")
     picture("search.png", "Figure 5. Bayesian trials in execution order. Parameters, fold scores and durations are preserved in results/search.csv.")
     page()
 
     heading("5 HMM and Viterbi route reconstruction")
     para("A hidden state is a directed candidate arc for one GPS observation. The positive-class probability of each candidate becomes odds p/(1-p), then is normalised across shortlisted arcs. The Viterbi score combines log emission with the best previous state and its normalised log transition score. Backpointers recover one hidden state per observation.")
     para(f"Directed shortest paths join the previous projected position to the next. The transition kernel penalises discrepancy between network travel distance and observed GPS displacement using a scale of {settings['beta']:g} + 0.3 times the sampling gap in seconds. Directed search is capped at {settings['max_distance']:g} m. Transitions outside a gap-dependent cap receive a finite fallback penalty, and gaps beyond {settings['reset_gap']:g} seconds reset the dynamic program. Repeated arc states can absorb small along-arc jitter. Output geometry stitches traversable gaps with intermediate arcs and records unresolved breaks.")
-    para("The shortlist falls back to the available road arcs on sparse graphs. An invalid or empty network fails validation. Beta was chosen among 8, 14, 20 and 35 using mean macro F1 on eight short training trips, with the fitted classifier held fixed. This is an in-sample calibration step, followed by a separate comparison on all ten student-test trips.")
+    para("The shortlist falls back to the available road arcs on sparse graphs. An invalid or empty network fails validation. Beta was selected from 8, 14, 20 and 35 by mean macro F1 on all 80 training trips. Each trip was decoded using probabilities from a classifier fitted on the other two grouped folds. The classification configuration was already selected by grouped CV. Final decoder evaluation used the ten separate student-test trips.")
+    calibration = read_csv("decoder_search.csv")
+    beta_scores = {beta: np.mean([float(r["macro_f1"]) for r in calibration if r["beta"] == beta])
+                   for beta in dict.fromkeys(r["beta"] for r in calibration)}
+    para("The training out-of-fold scores were " +
+         ", ".join(f"{score:.4f} at beta {float(beta):g}" for beta, score in beta_scores.items()) + ".")
     agg = []
     for method in ("Classifier", "Viterbi"):
         data = [row for row in comparison if row["method"] == method]
@@ -297,19 +401,28 @@ def report(root, output="results/PathSnap-Technical-Report.pdf"):
 
     heading("6 Geographical visualisation using Folium")
     para("The generated Folium map adds nearby road segments, original GPS points, the reference and reconstructed route as separately toggleable layers. Bounds fit the GPS and reconstructed geometry. The optional OpenStreetMap basemap is initially off.")
-    picture("folium.png", "Figure 7. Exported Folium view of student-test trip 00000052. Interactive generation is implemented in pathsnap/routes.py.", maximum=125*mm)
-    para("Trip 00000052 is the shortest supplied student-test trip by observation count. The view is useful for checking coordinate order and seeing where point observations diverge from the mapped road. Sequence accuracy claims use all ten trips.")
+    for index, trip in enumerate(("00000056", "00000052")):
+        if index:
+            page()
+            heading("6 Geographical visualisation using Folium")
+        a, b = [r for r in comparison if r["trip"] == trip]
+        picture(f"folium_{trip}.png", f"Student-test trip {trip}. Interactive map in results/student_trip_map_{trip}.html.", maximum=118*mm)
+        para(f"For {trip}, the classifier had {a['breaks']} route breaks and Viterbi had {b['breaks']}. Pointwise accuracy changed from {float(a['top1']):.2%} to {float(b['top1']):.2%}. Route arc Jaccard changed from {float(a['arc_jaccard']):.2%} to {float(b['arc_jaccard']):.2%}.")
+        para("A reconstruction can rank fewer observation-level labels correctly while still connecting adjacent arcs. Breaks, overlap and pointwise accuracy capture different effects of decoding.")
     page()
 
     heading("7 API, UI and deployment")
-    para("Laptop 1 serves FastAPI with the trained model and private scoring references. Laptop 2 serves a static UI and sends selected IDs to POST /match. GET /trips enumerates the ten configured inputs. The API returns only observations, inferred arc IDs and geometry, break indices, timing and aggregate accuracy. The receiving console logs its match requests.")
-    picture("ui.png", "Figure 8. Browser UI after a live student-test API response for trip 00000052.", maximum=111*mm)
-    picture("api.png", "Figure 9. Captured stdout from successful HTTP requests against the local receiving API. The transcript is also saved as results/api_smoke.txt.", maximum=74*mm)
-    para("All ten development trips succeeded over HTTP in demo mode and in an evaluator-mode fixture with separate reference files. The reserved evaluator partition and physical two-laptop LAN were unavailable. The repository documents both demo and evaluator deployment.")
+    para("Laptop 1 serves FastAPI with the trained model and private scoring references. Laptop 2 serves a static UI. GET /trips enumerates ten inputs and POST /match scores the selected trip. The receiving console logs match requests.")
+    picture("api.png", "Receiving Uvicorn log from the actual development API run, rendered from results/receiver.log.", maximum=95*mm)
+    para("All ten student-test trips were exercised over HTTP. A separate evaluator-mode development fixture isolates the reference files. Physical two-laptop operation and reserved evaluator trips require a live run on the team equipment.")
+    page()
+    heading("7 Browser evidence")
+    for trip in ("00000052", "00000056", "00000076"):
+        picture(f"ui_{trip}.png", f"Live student-test inference for trip {trip}.", maximum=69*mm)
     page()
     heading("Reproducibility and authorship")
     para("The repository contains the source pipeline, saved model, configuration, logged results, plots, and commands for recreating the Folium map and this report. Raw dataset files and private evaluator references belong on the team machines.")
-    para("Codex assisted with implementation, experimental execution, interface design and report drafting. All reported metrics are computed from recorded runs. The team is responsible for analysing and explaining the results and confirming that its submission meets the organiser's independent-work and disclosure requirements.")
+    para("The team supplied project requirements, author details and revision requests, and ran the initial demo on Windows. Codex implemented the pipeline and interface, ran the recorded experiments and integration tests, and prepared the report and figures. All reported metrics are computed from recorded runs. The team is responsible for analysing and explaining the results and confirming that its submission meets the organiser's independent-work and disclosure requirements.")
     para("This report follows the supplied PathSnap Main Guidelines, Dataset Exploration, Models and Training Guidelines, Deliverables, and Assessment and Plagiarism Policy. These are the supplied hackathon documents. The video attachment exceeded the workspace transfer limit and was unavailable for review.")
 
     def footer(canvas, doc):
@@ -321,7 +434,7 @@ def report(root, output="results/PathSnap-Technical-Report.pdf"):
         canvas.drawRightString(190*mm, 10*mm, str(doc.page))
 
     pdf = SimpleDocTemplate(output, pagesize=(210*mm, 297*mm), rightMargin=20*mm, leftMargin=20*mm,
-                            topMargin=17*mm, bottomMargin=21*mm, title="PathSnap Technical Report", author="PathSnap project")
+                            topMargin=17*mm, bottomMargin=21*mm, title="PathSnap Technical Report", author=f"{team['name']} ({authors})")
     pdf.build(story, onFirstPage=footer, onLaterPages=footer)
 
 
